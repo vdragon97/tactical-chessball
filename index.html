@@ -790,49 +790,67 @@
 
             const availableTypes = ['ROOK', 'KNIGHT', 'BISHOP'];
             const centerCol = Math.floor(cols / 2);
-            // BALANCE: Queen may only stand at least 2 files away from the King's file
+            const randType = () => availableTypes[Math.floor(Math.random() * availableTypes.length)];
+            const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
+            const key = (r, c) => `${r},${c}`;
+            // BALANCE #1: Queen may only stand >= 2 files away from the King's file
             const isQueenSafeCol = (c) => Math.abs(c - centerCol) >= 2;
+            // BALANCE #2: Black is the 180-degree mirror of White
+            const mirror = (r, c) => ({ r: rows - 1 - r, c: cols - 1 - c });
 
-            ['white', 'black'].forEach(team => {
-                let piecePositions = [];
-                let queenPos = null; // the ORIGINAL (non-promoted) Queen of this team
-
+            // Collect the "lineup slots" of a team: Rook/Knight/Bishop squares + the original Queen's square.
+            // (Promoted Queens are not part of the starting lineup, so they are never touched.)
+            const collectSlots = (team) => {
+                const slots = [];
+                let queenSlot = null;
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
                         const piece = board[r][c];
                         if (!piece || piece.team !== team) continue;
                         if (availableTypes.includes(piece.type)) {
-                            piecePositions.push({ r, c });
+                            slots.push({ r, c });
                         } else if (piece.type === 'QUEEN' && !piece.isPromoted && piece.originalType !== 'PAWN') {
-                            queenPos = { r, c };
+                            queenSlot = { r, c };
+                            slots.push({ r, c });
                         }
                     }
                 }
+                return { slots, queenSlot };
+            };
 
-                // 1) Randomize Rook / Knight / Bishop (same behaviour as before)
-                piecePositions.forEach(pos => {
-                    const randomType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
-                    board[pos.r][pos.c].type = randomType;
-                });
+            const W = collectSlots('white');
+            const B = collectSlots('black');
 
-                // 2) Randomly re-seat the Queen, but ONLY on a safe file (never centre / next to centre).
-                //    Only the piece types are swapped, so no piece moves and the ball holder never changes.
-                if (queenPos) {
-                    const safeSlots = piecePositions.filter(p => isQueenSafeCol(p.c));
-                    if (isQueenSafeCol(queenPos.c)) safeSlots.push(queenPos); // staying put is allowed
-                    if (safeSlots.length > 0) {
-                        const target = safeSlots[Math.floor(Math.random() * safeSlots.length)];
-                        if (target.r !== queenPos.r || target.c !== queenPos.c) {
-                            const queenPiece = board[queenPos.r][queenPos.c];
-                            const targetPiece = board[target.r][target.c];
-                            targetPiece.type = 'QUEEN';
-                            queenPiece.type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
-                        }
-                    }
-                }
+            // ---- 1) WHITE: random Rook/Knight/Bishop, Queen on a random SAFE slot ----
+            const whiteTypes = new Map();
+            W.slots.forEach(p => whiteTypes.set(key(p.r, p.c), randType()));
+            if (W.queenSlot) {
+                const safe = W.slots.filter(p => isQueenSafeCol(p.c));
+                const q = safe.length ? pickOne(safe) : W.queenSlot; // no safe slot -> Queen stays put
+                whiteTypes.set(key(q.r, q.c), 'QUEEN');
+            }
+
+            // ---- 2) BLACK: mirror White's lineup (rotate 180 degrees) ----
+            const blackTypes = new Map();
+            B.slots.forEach(p => {
+                const m = mirror(p.r, p.c);
+                blackTypes.set(key(p.r, p.c), whiteTypes.get(key(m.r, m.c)) || randType()); // unpaired (mid-game) -> random
             });
+            // Keep Queen counts correct if the two sides are no longer a perfect pair (mid-game captures)
+            const blackQueenKeys = [...blackTypes].filter(([, t]) => t === 'QUEEN').map(([k]) => k);
+            if (!B.queenSlot) {
+                blackQueenKeys.forEach(k => blackTypes.set(k, randType()));
+            } else if (blackQueenKeys.length === 0) {
+                const safe = B.slots.filter(p => isQueenSafeCol(p.c));
+                const q = safe.length ? pickOne(safe) : B.queenSlot;
+                blackTypes.set(key(q.r, q.c), 'QUEEN');
+            }
 
-            logEvent(`🎲 Random lineup generated (Queens kept away from the centre files)!`);
+            // ---- 3) Apply (only piece TYPES change; no piece moves, so the ball holder never changes) ----
+            W.slots.forEach(p => { board[p.r][p.c].type = whiteTypes.get(key(p.r, p.c)); });
+            B.slots.forEach(p => { board[p.r][p.c].type = blackTypes.get(key(p.r, p.c)); });
+
+            logEvent(`🎲 Random lineup generated: both teams mirrored, Queens kept away from the centre files!`);
             renderBoard();
             if (isOnline) sendGameState();
         }
