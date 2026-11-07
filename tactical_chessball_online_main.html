@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tactical ChessBall - eSports Prototype</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PeerJS CDN for P2P Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Inter:wght@400;600;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            user-select: none;
+        }
+
+        .font-teko {
+            font-family: 'Teko', sans-serif;
+        }
+
+        /* Custom Pitch Styling */
+        .pitch-container {
+            background: linear-gradient(135deg, #111827 0%, #0d131f 100%);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), inset 0 0 2px rgba(255, 255, 255, 0.1);
+            transition: transform 0.4s ease;
+        }
+
+        /* Rotate pitch 180deg so the viewer's own team is at the bottom (white/host/local = rotated, black/guest = normal) */
+        .board-flipped {
+            transform: rotate(180deg);
+        }
+
+        .board-flipped .chess-piece,
+        .board-flipped .ball-token {
+            transform: rotate(180deg);
+        }
+
+        .pitch-grid {
+            display: grid;
+            gap: 2px;
+            background-color: #1e293b;
+            border: 4px solid #334155;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.15);
+            position: relative;
+        }
+
+        .pitch-cell {
+            position: relative;
+            aspect-ratio: 1;
+            transition: all 0.15s ease;
+        }
+
+        .pitch-cell.grass-1 { background-color: #15803d; }
+        .pitch-cell.grass-2 { background-color: #166534; }
+
+        /* Tactical Overlays */
+        .cell-valid-move {
+            background-color: rgba(16, 185, 129, 0.45) !important;
+            box-shadow: inset 0 0 0 2px #34d399, 0 0 12px rgba(52, 211, 153, 0.6);
+            cursor: pointer;
+        }
+
+        .cell-valid-move::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background-color: #34d399;
+            border-radius: 50%;
+            position: absolute;
+            box-shadow: 0 0 8px #34d399;
+        }
+
+        .cell-valid-pass {
+            background-color: rgba(234, 179, 8, 0.45) !important;
+            box-shadow: inset 0 0 0 2px #fde047, 0 0 12px rgba(253, 224, 71, 0.6);
+            cursor: pointer;
+        }
+
+        .cell-valid-pass::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background-color: #fde047;
+            border-radius: 50%;
+            position: absolute;
+            box-shadow: 0 0 8px #fde047;
+        }
+
+        .cell-selected {
+            background-color: rgba(236, 72, 153, 0.5) !important;
+            box-shadow: inset 0 0 0 3px #f472b6, 0 0 15px rgba(244, 114, 182, 0.8);
+        }
+
+        /* Game Elements */
+        .chess-piece {
+            transition: transform 0.1s ease, filter 0.2s ease;
+            cursor: grab;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+        }
+
+        .chess-piece:active {
+            cursor: grabbing;
+            transform: scale(1.1);
+        }
+
+        .chess-piece.white-piece {
+            color: #f8fafc;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8)) drop-shadow(0 0 8px rgba(255,255,255,0.4));
+        }
+
+        .chess-piece.black-piece {
+            color: #0f172a;
+            filter: drop-shadow(0 2px 4px rgba(255,255,255,0.2)) drop-shadow(0 0 8px rgba(0,0,0,0.9));
+        }
+
+        .ball-token {
+            width: 55%;
+            height: 55%;
+            background: radial-gradient(circle at 35% 35%, #ffffff, #cbd5e1 60%, #475569 100%);
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.7), 0 0 12px rgba(255,255,255,0.8);
+            border: 2px solid #0f172a;
+            cursor: grab;
+            z-index: 20;
+            transition: transform 0.15s ease;
+        }
+
+        .ball-token.ball-held {
+            width: 32% !important;
+            height: 32% !important;
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            border: 1.5px solid #0f172a;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.8), 0 0 8px rgba(255,255,255,0.9);
+            z-index: 25;
+        }
+
+        .ball-token:hover {
+            transform: scale(1.15) rotate(15deg);
+        }
+
+        /* Outer Border Only for Promotion Zones */
+        .zone-border-top {
+            border-top: 2px dashed rgba(255, 255, 255, 0.85) !important;
+        }
+        .zone-border-bottom {
+            border-bottom: 2px dashed rgba(255, 255, 255, 0.85) !important;
+        }
+        .zone-border-left {
+            border-left: 2px dashed rgba(255, 255, 255, 0.85) !important;
+        }
+        .zone-border-right {
+            border-right: 2px dashed rgba(255, 255, 255, 0.85) !important;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col justify-between">
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between z-30">
+        <div class="flex items-center space-x-3">
+            <div class="bg-emerald-500 text-slate-950 p-2 rounded-lg font-bold text-xl tracking-wider font-teko">
+                <i class="fa-solid fa-chess-knight mr-1"></i> TCB
+            </div>
+            <div>
+                <h1 class="font-teko text-2xl tracking-wide uppercase font-bold text-emerald-400 leading-none">Tactical ChessBall</h1>
+                <p class="text-xs text-slate-400">eSports Hybrid Competitive Prototype</p>
+            </div>
+        </div>
+
+        <!-- Pitch Configuration & Actions -->
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+                <label for="pitchSize" class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Stadium Size:</label>
+                <select id="pitchSize" onchange="changePitchSize(this.value)" class="bg-slate-900 text-emerald-400 text-sm font-bold rounded px-2 py-1 outline-none border border-slate-700 cursor-pointer">
+                    <option value="7x11" selected>7 x 11 (Standard Balance)</option>
+                    <option value="5x9">5 x 9 (Futsal / Pressing)</option>
+                    <option value="9x13">9 x 13 (Grand FIFA Pitch)</option>
+                </select>
+            </div>
+
+            <button onclick="randomizeRookKnightBishop()" class="bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-600 text-xs uppercase font-bold px-3 py-2 rounded-lg transition flex items-center space-x-1 shadow-md" title="Randomize Rook, Knight, and Bishop positions">
+                <i class="fa-solid fa-dice text-purple-400"></i>
+                <span>Random Lineup</span>
+            </button>
+
+            <button onclick="resetMatch()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs uppercase font-bold px-3 py-2 rounded-lg border border-slate-700 transition flex items-center space-x-1">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>Reset Match</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Game Workspace -->
+    <main class="flex-1 flex overflow-hidden">
+        
+        <!-- Left / Center: Pitch Display Area -->
+        <section class="flex-1 flex flex-col items-center justify-center p-4 relative overflow-auto">
+            
+            <!-- Pitch Wrapper -->
+            <div class="pitch-container p-4 rounded-2xl border border-slate-800 relative max-h-full max-w-full flex items-center justify-center">
+                <div id="pitchGrid" class="pitch-grid rounded-lg overflow-hidden">
+                    <!-- Dynamic Grid Cells rendered by JS -->
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Right Side Dashboard Controls -->
+        <aside class="w-80 lg:w-96 bg-slate-900/95 border-l border-slate-800 flex flex-col justify-between p-5 z-20">
+            
+            <div class="space-y-4 overflow-y-auto pr-1">
+                
+                <!-- Match Status Widget -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-inner">
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Match Status</div>
+                    <div class="flex items-center justify-between">
+                        <div id="turnIndicator" class="flex items-center space-x-3">
+                            <div id="turnBadge" class="w-4 h-4 rounded-full bg-slate-100 shadow-[0_0_10px_rgba(255,255,255,0.8)]"></div>
+                            <span id="turnText" class="font-teko text-2xl font-bold tracking-wide uppercase text-white">WHITE'S TURN</span>
+                        </div>
+                        <span id="turnCount" class="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400 border border-slate-700">Turn 1</span>
+                    </div>
+                </div>
+
+                <!-- Online Multiplayer Widget -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                    <div class="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center justify-between">
+                        <span><i class="fa-solid fa-globe mr-1"></i> Online Multiplayer</span>
+                        <span id="onlineBadge" class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">LOCAL (HOTSEAT)</span>
+                    </div>
+
+                    <div id="onlineSetup" class="space-y-2">
+                        <button onclick="createOnlineRoom()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs uppercase py-2 px-3 rounded-lg transition flex items-center justify-center space-x-2 shadow-md">
+                            <i class="fa-solid fa-circle-plus"></i>
+                            <span>Create Room (Host White)</span>
+                        </button>
+                        <div class="flex space-x-2">
+                            <input type="text" id="roomIdInput" placeholder="Enter Room ID..." maxlength="6" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white uppercase font-mono tracking-widest outline-none focus:border-cyan-500">
+                            <button onclick="joinOnlineRoom()" class="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition">Join</button>
+                        </div>
+                    </div>
+
+                    <div id="onlineStatus" class="hidden space-y-2 text-xs">
+                        <div class="flex justify-between bg-slate-900 p-2 rounded border border-slate-800 items-center">
+                            <span class="text-slate-400">Room Code:</span>
+                            <div class="flex items-center space-x-2">
+                                <span id="displayRoomId" class="font-mono font-bold text-cyan-400 text-sm tracking-wider">------</span>
+                                <button onclick="copyRoomLink()" class="bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition flex items-center space-x-1" title="Copy direct join code">
+                                    <i class="fa-solid fa-copy"></i>
+                                    <span>Copy Code</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="connStatusText" class="text-amber-400 font-mono font-bold text-center text-[11px]">Connecting…</div>
+                        <button onclick="forceSyncState()" class="w-full bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase py-1.5 px-3 rounded-lg transition flex items-center justify-center space-x-2 shadow-md" title="Force pull latest board state immediately">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span>⚡ Resync</span>
+                        </button>
+                        <button onclick="leaveOnline()" class="w-full bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 font-bold text-xs uppercase py-1.5 px-3 rounded-lg transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                            <span>Leave Room</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Mode Selector Toggle -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-widest">Action Selection</label>
+                    <div class="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <button id="btnMoveMode" onclick="setActionMode('move')" class="py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-emerald-600 text-white shadow-lg">
+                            <i class="fa-solid fa-person-running text-sm"></i>
+                            <span>Move / Dribble</span>
+                        </button>
+                        <button id="btnPassMode" onclick="setActionMode('pass')" class="py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-slate-800 text-slate-400 hover:text-white">
+                            <i class="fa-solid fa-futbol text-sm"></i>
+                            <span>Pass / Shoot</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Active Ball Status -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-slate-100 to-slate-400 flex items-center justify-center text-slate-950 shadow-md">
+                            <i class="fa-solid fa-futbol text-sm"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-slate-200">Ball Position</div>
+                            <div id="ballPossessionText" class="text-xs text-slate-400 font-mono">Unpossessed (Loose Ball)</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Turn History & Event Log -->
+            <div class="mt-4 flex-1 flex flex-col min-h-0 bg-slate-950 rounded-xl border border-slate-800 p-3 overflow-hidden">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+                    <span>Match Commentary Log</span>
+                    <i class="fa-solid fa-list-ul text-slate-500"></i>
+                </div>
+                <div id="eventLog" class="flex-1 overflow-y-auto space-y-1.5 text-xs font-mono pr-1 text-slate-300">
+                    <div class="text-slate-500 italic">[Match Initialized] Kick-off ready!</div>
+                </div>
+            </div>
+
+            <!-- Footer Action Bar -->
+            <div class="pt-4 border-t border-slate-800 text-center">
+                <p class="text-[11px] text-slate-500">Maximum move distance: <span class="text-emerald-400 font-bold">8 squares</span> limit per turn.</p>
+            </div>
+
+        </aside>
+
+    </main>
+
+    <!-- JS Logic -->
+    <script>
+        // Game Constants & Configuration
+        const PIECE_TYPES = {
+            KING: { name: 'Goalkeeper (King)', icon: 'fa-chess-king', code: 'K' },
+            QUEEN: { name: 'Playmaker (Queen)', icon: 'fa-chess-queen', code: 'Q' },
+            ROOK: { name: 'Winger (Rook)', icon: 'fa-chess-rook', code: 'R' },
+            BISHOP: { name: 'Midfielder (Bishop)', icon: 'fa-chess-bishop', code: 'B' },
+            KNIGHT: { name: 'Forward (Knight)', icon: 'fa-chess-knight', code: 'N' },
+            PAWN: { name: 'Defender (Pawn)', icon: 'fa-chess-pawn', code: 'P' }
+        };
+
+        // Pitch Dimensions & Game State
+        let cols = 7;
+        let rows = 11;
+        let board = [];
+        let ballPos = { r: 5, c: 3 };
+        let turnCounter = 1;
+        let currentTurn = 'white'; // 'white' or 'black'
+        let whiteSubs = 5;
+        let blackSubs = 5;
+        let selectedPiecePos = null;
+        let actionMode = 'move'; // 'move' or 'pass'
+        let gameOver = false;
+
+        // =====================================================================
+        // ONLINE MULTIPLAYER  (PeerJS / WebRTC, works across tabs, browsers, devices)
+        // Host (White) registers a Peer ID derived from the room code.
+        // Guest (Black) connects to that Peer ID. After that, every finished
+        // turn sends the full game state over the data channel.
+        // =====================================================================
+        const ROOM_PREFIX = 'tcb-chessball-';
+        const PEER_OPTIONS = {
+            debug: 1,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    // Free public TURN relay (helps on 4G / corporate networks). Replace with your own for production.
+                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+                ]
+            }
+        };
+
+        let peer = null;
+        let conn = null;
+        let isOnline = false;
+        let myRole = 'local'; // 'white' (host), 'black' (guest), or 'local'
+        let roomId = '';
+        let isPeerConnected = false;
+        let joinTimer = null;
+
+        // View-only perspective: each player sees their OWN team at the bottom.
+        // (Pure CSS rotation - game data/logic is untouched: white still starts on row 0.)
+        function applyBoardPerspective() {
+            const pitchEl = document.querySelector('.pitch-container');
+            if (pitchEl) pitchEl.classList.toggle('board-flipped', myRole !== 'black');
+        }
+
+        window.onload = function() {
+            initGame();
+            applyBoardPerspective();
+            checkAutoJoinFromURL();
+        };
+
+        // ---------- helpers ----------
+        function loadPeerLib() {
+            return new Promise((resolve, reject) => {
+                if (window.Peer) return resolve();
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js'; // fallback CDN
+                s.onload = () => window.Peer ? resolve() : reject(new Error('PeerJS missing'));
+                s.onerror = () => reject(new Error('Cannot load PeerJS'));
+                document.head.appendChild(s);
+            });
+        }
+
+        function genRoomCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusing 0/O/1/I
+            let s = '';
+            for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+            return s;
+        }
+
+        function setStatus(msg, kind) {
+            const el = document.getElementById('connStatusText');
+            if (!el) return;
+            const colors = { ok: 'text-emerald-400', wait: 'text-amber-400', err: 'text-rose-400' };
+            el.innerText = msg;
+            el.className = `${colors[kind] || 'text-slate-300'} font-mono font-bold text-center text-[11px]`;
+        }
+
+        function showOnlineUI(badgeText, badgeClass) {
+            document.getElementById('onlineSetup').classList.add('hidden');
+            document.getElementById('onlineStatus').classList.remove('hidden');
+            document.getElementById('displayRoomId').innerText = roomId;
+            const badge = document.getElementById('onlineBadge');
+            badge.innerText = badgeText;
+            badge.className = `text-[10px] px-2 py-0.5 rounded font-mono font-bold ${badgeClass}`;
+        }
+
+        function leaveOnline(silent) {
+            clearTimeout(joinTimer);
+            const oldPeer = peer, oldConn = conn;
+            peer = null; conn = null;
+            try { if (oldConn) oldConn.close(); } catch (e) {}
+            try { if (oldPeer) oldPeer.destroy(); } catch (e) {}
+            isOnline = false; isPeerConnected = false; myRole = 'local'; roomId = '';
+
+            applyBoardPerspective();
+            document.getElementById('onlineSetup').classList.remove('hidden');
+            document.getElementById('onlineStatus').classList.add('hidden');
+            const badge = document.getElementById('onlineBadge');
+            badge.innerText = 'LOCAL (HOTSEAT)';
+            badge.className = 'text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+            if (!silent) logEvent('🚪 Left the room. Back to local hotseat mode.');
+        }
+
+        function failOnline(msg) {
+            leaveOnline(true);
+            logEvent(`❌ ${msg}`);
+            alert(msg);
+        }
+
+        function checkAutoJoinFromURL() {
+            const autoRoom = new URLSearchParams(window.location.search).get('room');
+            if (autoRoom) {
+                document.getElementById('roomIdInput').value = autoRoom.toUpperCase();
+                setTimeout(joinOnlineRoom, 300);
+            }
+        }
+
+        function copyRoomLink() {
+            if (!roomId) return;
+            const done = () => logEvent(`📋 Room Code [${roomId}] copied! Send it to your opponent.`);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(roomId).then(done).catch(() => { fallbackCopy(roomId); done(); });
+            } else {
+                fallbackCopy(roomId); done();
+            }
+        }
+
+        function fallbackCopy(text) {
+            const t = document.createElement('textarea');
+            t.value = text;
+            document.body.appendChild(t);
+            t.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(t);
+        }
+
+        // ---------- create / join ----------
+        async function createOnlineRoom() {
+            leaveOnline(true);
+            try { await loadPeerLib(); }
+            catch (e) { alert('Cannot load the PeerJS library. Check your internet connection / ad-blocker.'); return; }
+
+            // Start a clean match as host
+            resetState();
+            startHost(0);
+        }
+
+        function startHost(attempt) {
+            const code = genRoomCode();
+            roomId = code;
+            myRole = 'white';
+            isOnline = true;
+            isPeerConnected = false;
+            applyBoardPerspective();
+            showOnlineUI('HOST (WHITE)', 'bg-cyan-900 text-cyan-300');
+            setStatus('Connecting to server…', 'wait');
+
+            const p = new Peer(ROOM_PREFIX + code, PEER_OPTIONS);
+            peer = p;
+
+            p.on('open', () => {
+                if (p !== peer) return;
+                setStatus('Waiting for opponent… share the Room Code', 'wait');
+                logEvent(`🌐 Room [${code}] created. Waiting for opponent to join.`);
+            });
+
+            p.on('connection', (c) => {
+                if (p !== peer) return;
+                // New guest replaces any stale/old connection (e.g. guest refreshed the page)
+                if (conn && conn !== c) { const old = conn; conn = null; try { old.close(); } catch (e) {} }
+                conn = c;
+                bindConn(c, p);
+            });
+
+            p.on('disconnected', () => {
+                // Lost signaling server only; existing data channel keeps working
+                if (p === peer && !p.destroyed) { try { p.reconnect(); } catch (e) {} }
+            });
+
+            p.on('error', (err) => {
+                if (p !== peer) return;
+                console.warn('PeerJS host error:', err.type, err);
+                if (err.type === 'unavailable-id' && attempt < 5) {
+                    peer = null;
+                    try { p.destroy(); } catch (e) {}
+                    startHost(attempt + 1); // room code collision → new code
+                } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+                    setStatus(`Cannot reach PeerJS server (${err.type}). Retrying…`, 'err');
+                } else {
+                    setStatus(`Connection error: ${err.type}`, 'err');
+                }
+            });
+        }
+
+        async function joinOnlineRoom() {
+            const code = (document.getElementById('roomIdInput').value || '').trim().toUpperCase();
+            if (!/^[A-Z0-9]{6}$/.test(code)) {
+                alert('Please enter the 6-character Room ID!');
+                return;
+            }
+            leaveOnline(true);
+            try { await loadPeerLib(); }
+            catch (e) { alert('Cannot load the PeerJS library. Check your internet connection / ad-blocker.'); return; }
+
+            roomId = code;
+            myRole = 'black';
+            isOnline = true;
+            isPeerConnected = false;
+            applyBoardPerspective();
+            showOnlineUI('GUEST (BLACK)', 'bg-rose-900 text-rose-300');
+            setStatus('Connecting to server…', 'wait');
+
+            const p = new Peer(PEER_OPTIONS);
+            peer = p;
+
+            p.on('open', () => {
+                if (p !== peer) return;
+                setStatus('Looking for room…', 'wait');
+                const c = p.connect(ROOM_PREFIX + code, { reliable: true, serialization: 'json' });
+                conn = c;
+                bindConn(c, p);
+                joinTimer = setTimeout(() => {
+                    if (p === peer && !(conn && conn.open)) {
+                        failOnline('Could not connect to the host (timeout). Check the code, or try again. If you are on a strict network, a TURN server may be needed.');
+                    }
+                }, 15000);
+            });
+
+            p.on('disconnected', () => {
+                if (p === peer && !p.destroyed && !(conn && conn.open)) { try { p.reconnect(); } catch (e) {} }
+            });
+
+            p.on('error', (err) => {
+                if (p !== peer) return;
+                console.warn('PeerJS guest error:', err.type, err);
+                if (err.type === 'peer-unavailable') {
+                    failOnline(`Room [${code}] not found. Make sure the host has created it and the code is correct.`);
+                } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+                    setStatus(`Cannot reach PeerJS server (${err.type})`, 'err');
+                } else {
+                    setStatus(`Connection error: ${err.type}`, 'err');
+                }
+            });
+        }
+
+        // ---------- data channel ----------
+        function bindConn(c, p) {
+            c.on('open', () => {
+                if (p !== peer || conn !== c) return;
+                clearTimeout(joinTimer);
+                isPeerConnected = true;
+                if (myRole === 'white') {
+                    setStatus('Opponent connected! Match in progress.', 'ok');
+                    logEvent('🟢 Opponent connected! You are WHITE.');
+                    sendGameState();
+                } else {
+                    setStatus('Connected to host! You are BLACK.', 'ok');
+                    logEvent(`🟢 Joined room [${roomId}] as BLACK.`);
+                    c.send({ type: 'HELLO' }); // ask host for the current state
+                }
+            });
+
+            c.on('data', (d) => {
+                if (p === peer && conn === c) handlePacket(d);
+            });
+
+            c.on('close', () => {
+                if (p !== peer || conn !== c) return;
+                isPeerConnected = false;
+                conn = null;
+                if (myRole === 'white') {
+                    setStatus('Opponent left. Waiting for a new opponent…', 'wait');
+                    logEvent('⚠️ Opponent disconnected.');
+                } else {
+                    setStatus('Host disconnected.', 'err');
+                    logEvent('⚠️ Host disconnected.');
+                }
+            });
+
+            c.on('error', (err) => {
+                console.warn('Data connection error:', err);
+                if (p === peer) setStatus('Connection error. Try Leave and re-join.', 'err');
+            });
+        }
+
+        function handlePacket(d) {
+            if (!d || !d.type) return;
+            if (d.type === 'HELLO' && myRole === 'white') {
+                sendGameState();
+            } else if (d.type === 'STATE' && d.from !== myRole) {
+                applyRemoteState(d);
+            }
+        }
+
+        function sendGameState() {
+            if (!isOnline) return;
+            if (!conn || !conn.open) {
+                if (myRole === 'black') logEvent('⚠️ Not connected to host – your move was NOT sent!');
+                return; // host: guest will receive full state when they join
+            }
+            conn.send({
+                type: 'STATE',
+                from: myRole,
+                cols, rows,
+                board, ballPos,
+                turnCounter, currentTurn,
+                whiteSubs, blackSubs,
+                gameOver
+            });
+        }
+
+        function applyRemoteState(d) {
+            const wasOver = gameOver;
+            cols = d.cols; rows = d.rows;
+            board = d.board; ballPos = d.ballPos;
+            turnCounter = d.turnCounter; currentTurn = d.currentTurn;
+            whiteSubs = d.whiteSubs; blackSubs = d.blackSubs;
+            gameOver = d.gameOver;
+            selectedPiecePos = null;
+
+            const sel = document.getElementById('pitchSize');
+            if (sel) sel.value = `${cols}x${rows}`;
+
+            renderBoard();
+            updateUI();
+
+            if (gameOver && !wasOver) {
+                logEvent(`🎉 GAME OVER! ${String(d.from).toUpperCase()} WINS!`);
+                setTimeout(() => alert(`🎉 GAME OVER!\n${String(d.from).toUpperCase()} WINS!`), 50);
+            } else {
+                logEvent(`🔄 State updated. It is now ${currentTurn.toUpperCase()}'s turn.`);
+            }
+        }
+
+        function forceSyncState() {
+            if (!isOnline || !conn || !conn.open) {
+                logEvent('⚠️ Not connected to an opponent.');
+                return;
+            }
+            if (myRole === 'white') sendGameState();
+            else conn.send({ type: 'HELLO' });
+            logEvent('⚡ Resync requested.');
+        }
+
+        function changePitchSize(sizeStr) {
+            if (isOnline && myRole !== 'white') {
+                logEvent('⚠️ Only the host can change the stadium size online.');
+                const sel = document.getElementById('pitchSize');
+                if (sel) sel.value = `${cols}x${rows}`;
+                return;
+            }
+            const [c, r] = sizeStr.split('x').map(Number);
+            cols = c;
+            rows = r;
+            resetMatch();
+        }
+
+        function resetState() {
+            turnCounter = 1;
+            currentTurn = 'white';
+            whiteSubs = 5;
+            blackSubs = 5;
+            selectedPiecePos = null;
+            actionMode = 'move';
+            gameOver = false;
+            initGame();
+        }
+
+        function resetMatch() {
+            if (isOnline && myRole !== 'white') {
+                logEvent('⚠️ Only the host can reset the match online.');
+                return;
+            }
+            resetState();
+            logEvent(`Stadium adjusted to ${cols}x${rows}. Match reset!`);
+            if (isOnline) sendGameState();
+        }
+
+        function initGame() {
+            board = Array(rows).fill(null).map(() => Array(cols).fill(null));
+
+            setupTeam('white', 0, 1, 2);
+            setupTeam('black', rows - 1, rows - 2, rows - 3);
+
+            ballPos = { r: Math.floor(rows / 2), c: Math.floor(cols / 2) };
+
+            updateUI();
+            renderBoard();
+        }
+
+        function setupTeam(team, backRow, midRow, frontRow) {
+            const centerCol = Math.floor(cols / 2);
+            const isWhite = (team === 'white');
+            const forwardStep = isWhite ? 1 : -1;
+            const wingRow = backRow + forwardStep;
+
+            board[backRow][centerCol] = { type: 'KING', team: team, isPromoted: false, hasMoved: false };
+
+            if (cols >= 5) {
+                board[wingRow][0] = { type: 'ROOK', team: team, isPromoted: false, hasMoved: false };
+                board[wingRow][cols - 1] = { type: 'ROOK', team: team, isPromoted: false, hasMoved: false };
+                
+                if (cols >= 7) {
+                    board[wingRow][1] = { type: 'BISHOP', team: team, isPromoted: false, hasMoved: false };
+                    board[wingRow][cols - 2] = { type: 'BISHOP', team: team, isPromoted: false, hasMoved: false };
+                }
+            }
+
+            board[midRow][centerCol] = { type: 'QUEEN', team: team, isPromoted: false, hasMoved: false };
+
+            if (centerCol - 1 >= 0) board[midRow][centerCol - 1] = { type: 'KNIGHT', team: team, isPromoted: false, hasMoved: false };
+            if (centerCol + 1 < cols) board[midRow][centerCol + 1] = { type: 'KNIGHT', team: team, isPromoted: false, hasMoved: false };
+
+            // BALANCE: the Queen must never start on the centre file (straight line to King / goal).
+            // Swap her with a Bishop (or with a Rook on a 5-wide pitch). White takes the left slot,
+            // Black the right slot, so the formation stays rotationally symmetric / fair.
+            let queenSlotCol = null;
+            if (cols >= 7) queenSlotCol = isWhite ? 1 : cols - 2;      // Bishop slot
+            else if (cols >= 5) queenSlotCol = isWhite ? 0 : cols - 1; // Rook slot (no bishops on 5-wide)
+            if (queenSlotCol !== null && board[midRow][queenSlotCol] && board[midRow][centerCol]) {
+                const displaced = board[midRow][queenSlotCol];
+                board[midRow][queenSlotCol] = board[midRow][centerCol]; // Queen -> wing slot
+                board[midRow][centerCol] = displaced;                   // Bishop/Rook -> centre
+            }
+
+            for (let c = 0; c < cols; c++) {
+                if (!board[frontRow][c]) {
+                    board[frontRow][c] = { type: 'PAWN', team: team, originalType: 'PAWN', isPromoted: false, hasMoved: false };
+                }
+            }
+        }
+
+        function randomizeRookKnightBishop() {
+            if (isOnline && currentTurn !== myRole) {
+                logEvent("⏳ Only the player whose turn it is can randomize the lineup!");
+                return;
+            }
+
+            const availableTypes = ['ROOK', 'KNIGHT', 'BISHOP'];
+            const centerCol = Math.floor(cols / 2);
+            // BALANCE: Queen may only stand at least 2 files away from the King's file
+            const isQueenSafeCol = (c) => Math.abs(c - centerCol) >= 2;
+
+            ['white', 'black'].forEach(team => {
+                let piecePositions = [];
+                let queenPos = null; // the ORIGINAL (non-promoted) Queen of this team
+
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const piece = board[r][c];
+                        if (!piece || piece.team !== team) continue;
+                        if (availableTypes.includes(piece.type)) {
+                            piecePositions.push({ r, c });
+                        } else if (piece.type === 'QUEEN' && !piece.isPromoted && piece.originalType !== 'PAWN') {
+                            queenPos = { r, c };
+                        }
+                    }
+                }
+
+                // 1) Randomize Rook / Knight / Bishop (same behaviour as before)
+                piecePositions.forEach(pos => {
+                    const randomType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+                    board[pos.r][pos.c].type = randomType;
+                });
+
+                // 2) Randomly re-seat the Queen, but ONLY on a safe file (never centre / next to centre).
+                //    Only the piece types are swapped, so no piece moves and the ball holder never changes.
+                if (queenPos) {
+                    const safeSlots = piecePositions.filter(p => isQueenSafeCol(p.c));
+                    if (isQueenSafeCol(queenPos.c)) safeSlots.push(queenPos); // staying put is allowed
+                    if (safeSlots.length > 0) {
+                        const target = safeSlots[Math.floor(Math.random() * safeSlots.length)];
+                        if (target.r !== queenPos.r || target.c !== queenPos.c) {
+                            const queenPiece = board[queenPos.r][queenPos.c];
+                            const targetPiece = board[target.r][target.c];
+                            targetPiece.type = 'QUEEN';
+                            queenPiece.type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+                        }
+                    }
+                }
+            });
+
+            logEvent(`🎲 Random lineup generated (Queens kept away from the centre files)!`);
+            renderBoard();
+            if (isOnline) sendGameState();
+        }
+
+        function isSpecialZone(r, c) {
+            const midR = Math.floor(rows / 2);
+            const midC = Math.floor(cols / 2);
+
+            if (Math.abs(r - midR) <= 1 && Math.abs(c - midC) <= 1) {
+                return 'CENTER_CIRCLE';
+            }
+            if (r <= 1 && Math.abs(c - midC) <= 1) {
+                return 'WHITE_PENALTY_BOX';
+            }
+            if (r >= rows - 2 && Math.abs(c - midC) <= 1) {
+                return 'BLACK_PENALTY_BOX';
+            }
+            return null;
+        }
+
+        function renderBoard() {
+            const gridEl = document.getElementById('pitchGrid');
+            if (!gridEl) return;
+            gridEl.innerHTML = '';
+
+            gridEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+            const cellSize = Math.min(Math.floor(600 / rows), Math.floor(500 / cols));
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.style.width = `${cellSize}px`;
+                    cell.style.height = `${cellSize}px`;
+                    
+                    const isEven = (r + c) % 2 === 0;
+                    cell.className = `pitch-cell flex items-center justify-center ${isEven ? 'grass-1' : 'grass-2'}`;
+
+                    const zoneType = isSpecialZone(r, c);
+                    if (zoneType) {
+                        if (!isSpecialZone(r - 1, c) || isSpecialZone(r - 1, c) !== zoneType) cell.classList.add('zone-border-top');
+                        if (!isSpecialZone(r + 1, c) || isSpecialZone(r + 1, c) !== zoneType) cell.classList.add('zone-border-bottom');
+                        if (!isSpecialZone(r, c - 1) || isSpecialZone(r, c - 1) !== zoneType) cell.classList.add('zone-border-left');
+                        if (!isSpecialZone(r, c + 1) || isSpecialZone(r, c + 1) !== zoneType) cell.classList.add('zone-border-right');
+                    }
+
+                    if (selectedPiecePos && selectedPiecePos.r === r && selectedPiecePos.c === c) {
+                        cell.classList.add('cell-selected');
+                    }
+
+                    if (selectedPiecePos) {
+                        if (actionMode === 'move' && isValidMove(selectedPiecePos.r, selectedPiecePos.c, r, c)) {
+                            cell.classList.add('cell-valid-move');
+                        } else if (actionMode === 'pass' && isValidPass(selectedPiecePos.r, selectedPiecePos.c, r, c)) {
+                            cell.classList.add('cell-valid-pass');
+                        }
+                    }
+
+                    const piece = board[r][c];
+                    if (piece) {
+                        const pieceEl = document.createElement('i');
+                        pieceEl.className = `fa-solid ${PIECE_TYPES[piece.type].icon} text-2xl md:text-3xl chess-piece ${piece.team}-piece`;
+                        
+                        if (piece.isPromoted) {
+                            pieceEl.style.filter += ' drop-shadow(0 0 10px rgba(234, 179, 8, 0.9))';
+                        }
+                        cell.appendChild(pieceEl);
+                    }
+
+                    if (ballPos.r === r && ballPos.c === c) {
+                        const ballEl = document.createElement('div');
+                        const isHeld = (piece !== null);
+                        ballEl.className = `ball-token flex items-center justify-center absolute ${isHeld ? 'ball-held' : ''}`;
+                        cell.appendChild(ballEl);
+                    }
+
+                    cell.onclick = () => handleCellClick(r, c);
+                    gridEl.appendChild(cell);
+                }
+            }
+        }
+
+        function handleCellClick(r, c) {
+            if (gameOver) {
+                logEvent(`Match ended! Click Reset Match to play again.`);
+                return;
+            }
+
+            // Strict turn checking for online play
+            if (isOnline && currentTurn !== myRole) {
+                logEvent(`⏳ It's ${currentTurn.toUpperCase()}'s turn! You are playing as ${myRole.toUpperCase()}.`);
+                return;
+            }
+
+            const piece = board[r][c];
+
+            if (!selectedPiecePos) {
+                if (piece && piece.team === currentTurn) {
+                    selectedPiecePos = { r, c };
+                    renderBoard();
+                } else if (piece && piece.team !== currentTurn) {
+                    logEvent(`⚠️ That piece belongs to ${piece.team.toUpperCase()}!`);
+                }
+                return;
+            }
+
+            if (selectedPiecePos.r === r && selectedPiecePos.c === c) {
+                selectedPiecePos = null;
+                renderBoard();
+                return;
+            }
+
+            const fromR = selectedPiecePos.r;
+            const fromC = selectedPiecePos.c;
+
+            if (actionMode === 'pass' && isValidPass(fromR, fromC, r, c)) {
+                executePass(fromR, fromC, r, c);
+                return;
+            }
+
+            if (piece && piece.team === currentTurn) {
+                selectedPiecePos = { r, c };
+                renderBoard();
+                return;
+            }
+
+            if (actionMode === 'move') {
+                if (isValidMove(fromR, fromC, r, c)) {
+                    executeMove(fromR, fromC, r, c);
+                } else {
+                    logEvent(`Invalid move for ${board[fromR][fromC]?.type || 'Piece'}`);
+                }
+            } else if (actionMode === 'pass') {
+                logEvent(`Invalid pass target range! Maximum 8 squares.`);
+            }
+        }
+
+        function getDistance(r1, c1, r2, c2) {
+            return Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2));
+        }
+
+        function isValidMove(fromR, fromC, toR, toC) {
+            if (fromR === toR && fromC === toC) return false;
+            if (toR < 0 || toR >= rows || toC < 0 || toC >= cols) return false;
+
+            const piece = board[fromR][fromC];
+            if (!piece) return false;
+
+            const dist = getDistance(fromR, fromC, toR, toC);
+            if (dist > 8) return false;
+
+            const targetPiece = board[toR][toC];
+            if (targetPiece && targetPiece.team === piece.team) return false;
+
+            const dr = toR - fromR;
+            const dc = toC - fromC;
+            const absDr = Math.abs(dr);
+            const absDc = Math.abs(dc);
+
+            switch (piece.type) {
+                case 'KING':
+                    return absDr <= 1 && absDc <= 1;
+
+                case 'ROOK':
+                    if (dr !== 0 && dc !== 0) return false;
+                    return isPathClear(fromR, fromC, toR, toC);
+
+                case 'BISHOP':
+                    if (absDr !== absDc) return false;
+                    return isPathClear(fromR, fromC, toR, toC);
+
+                case 'QUEEN':
+                    if (dr !== 0 && dc !== 0 && absDr !== absDc) return false;
+                    return isPathClear(fromR, fromC, toR, toC);
+
+                case 'KNIGHT':
+                    return (absDr === 2 && absDc === 1) || (absDr === 1 && absDc === 2);
+
+                case 'PAWN': {
+                    const fwdDir = (piece.team === 'white') ? 1 : -1;
+                    const isCarryingBall = (ballPos.r === fromR && ballPos.c === fromC);
+
+                    if (dc === 0 && (dr === fwdDir || dr === -fwdDir) && !targetPiece) {
+                        return true;
+                    }
+                    if (dc === 0 && dr === 2 * fwdDir && !piece.hasMoved && !targetPiece) {
+                        const midR = fromR + fwdDir;
+                        return board[midR][fromC] === null;
+                    }
+                    if (absDc === 1 && (dr === fwdDir || dr === -fwdDir)) {
+                        if (targetPiece && targetPiece.team !== piece.team) return true;
+                        if (isCarryingBall && !targetPiece) return true;
+                    }
+
+                    return false;
+                }
+
+                default:
+                    return false;
+            }
+        }
+
+        function isPathClear(fromR, fromC, toR, toC) {
+            const dr = Math.sign(toR - fromR);
+            const dc = Math.sign(toC - fromC);
+            let currR = fromR + dr;
+            let currC = fromC + dc;
+
+            while (currR !== toR || currC !== toC) {
+                if (board[currR][currC] !== null) return false;
+                currR += dr;
+                currC += dc;
+            }
+            return true;
+        }
+
+        function isValidPass(fromR, fromC, toR, toC) {
+            if (ballPos.r !== fromR || ballPos.c !== fromC) return false;
+            if (toR < 0 || toR >= rows || toC < 0 || toC >= cols) return false;
+            if (fromR === toR && fromC === toC) return false;
+
+            const passer = board[fromR][fromC];
+            if (!passer) return false;
+
+            if (passer.originalType === 'PAWN' && !isSpecialZone(fromR, fromC)) {
+                passer.type = 'PAWN';
+                passer.isPromoted = false;
+            }
+
+            const distance = getDistance(fromR, fromC, toR, toC);
+            if (distance > 8) return false;
+
+            const targetPiece = board[toR][toC];
+            if (targetPiece && targetPiece.team !== passer.team) return false;
+
+            const dr = toR - fromR;
+            const dc = toC - fromC;
+            const absDr = Math.abs(dr);
+            const absDc = Math.abs(dc);
+
+            switch (passer.type) {
+                case 'KING':
+                    return absDr <= 1 && absDc <= 1;
+
+                case 'ROOK':
+                    if (dr !== 0 && dc !== 0) return false;
+                    return isPathClearForPass(fromR, fromC, toR, toC);
+
+                case 'BISHOP':
+                    if (absDr !== absDc) return false;
+                    return isPathClearForPass(fromR, fromC, toR, toC);
+
+                case 'QUEEN':
+                    if (dr !== 0 && dc !== 0 && absDr !== absDc) return false;
+                    return isPathClearForPass(fromR, fromC, toR, toC);
+
+                case 'PAWN': {
+                    if (dc === 0 && (absDr === 1 || absDr === 2)) {
+                        return isPathClearForPass(fromR, fromC, toR, toC);
+                    }
+                    if (dr === 0 && (absDc === 1 || absDc === 2)) {
+                        return isPathClearForPass(fromR, fromC, toR, toC);
+                    }
+                    if (absDc === 1 && absDr === 1) {
+                        return isPathClearForPass(fromR, fromC, toR, toC);
+                    }
+                    return false;
+                }
+
+                default:
+                    return false;
+            }
+        }
+
+        function isPathClearForPass(fromR, fromC, toR, toC) {
+            const dr = Math.sign(toR - fromR);
+            const dc = Math.sign(toC - fromC);
+            let currR = fromR + dr;
+            let currC = fromC + dc;
+
+            while (currR !== toR || currC !== toC) {
+                if (board[currR][currC] !== null) return false;
+                currR += dr;
+                currC += dc;
+            }
+            return true;
+        }
+
+        function executePass(fromR, fromC, toR, toC) {
+            const passer = board[fromR][fromC];
+            const receiver = board[toR][toC];
+            const fwdDir = (passer && passer.team === 'white') ? 1 : -1;
+            const isBackpass = (passer && (toR - fromR) * fwdDir < 0);
+
+            if (receiver) {
+                logEvent(`⚽ ${currentTurn.toUpperCase()} ${PIECE_TYPES[passer.type].code} PASSED DIRECTLY to ${PIECE_TYPES[receiver.type].code} at [${toC}, ${toR}]!`);
+            } else if (isBackpass) {
+                logEvent(`↩️ ${currentTurn.toUpperCase()} executed a BACK-PASS into space at [${toC}, ${toR}]!`);
+            } else {
+                logEvent(`⚽ ${currentTurn.toUpperCase()} kicked long ball into space at [${toC}, ${toR}]!`);
+            }
+            
+            ballPos = { r: toR, c: toC };
+            checkGoalWinCondition(currentTurn, toR, toC);
+
+            if (!gameOver) {
+                endTurn();
+            } else {
+                renderBoard();
+                updateUI();
+                if (isOnline) sendGameState(); // final (winning) move must reach the opponent too
+            }
+        }
+
+        function executeMove(fromR, fromC, toR, toC) {
+            const piece = board[fromR][fromC];
+            const targetPiece = board[toR][toC];
+            const carriesBall = (ballPos.r === fromR && ballPos.c === fromC);
+
+            piece.hasMoved = true;
+
+            const activeZone = isSpecialZone(toR, toC);
+            if (!activeZone && piece.originalType === 'PAWN') {
+                piece.type = 'PAWN';
+                piece.isPromoted = false;
+            }
+
+            if (targetPiece) {
+                logEvent(`⚔️ ${currentTurn.toUpperCase()} ${PIECE_TYPES[piece.type].code} captured ${targetPiece.team.toUpperCase()} ${PIECE_TYPES[targetPiece.type].code}!`);
+                if (targetPiece.type === 'KING') {
+                    triggerVictory(currentTurn, `CAPTURED ENEMY GOALKEEPER (KING)!`);
+                }
+            } else {
+                logEvent(`🏃 ${currentTurn.toUpperCase()} ${PIECE_TYPES[piece.type].code} moved to [${toC}, ${toR}]${carriesBall ? ' (Dribbling)' : ''}`);
+            }
+
+            board[toR][toC] = piece;
+            board[fromR][fromC] = null;
+
+            if (carriesBall) {
+                ballPos = { r: toR, c: toC };
+                checkGoalWinCondition(currentTurn, toR, toC);
+            }
+
+            if (piece.type === 'PAWN' || piece.originalType === 'PAWN') {
+                if (activeZone) {
+                    piece.type = 'QUEEN';
+                    piece.isPromoted = true;
+                    logEvent(`✨ ${currentTurn.toUpperCase()} Pawn PROMOTED to Playmaker (Queen) in ${activeZone}!`);
+                } else if (piece.isPromoted) {
+                    piece.type = 'PAWN';
+                    piece.isPromoted = false;
+                    logEvent(`📉 ${currentTurn.toUpperCase()} Queen DEMOTED back to Pawn after exiting Special Zone.`);
+                }
+            }
+
+            if (!gameOver) {
+                endTurn();
+            } else {
+                renderBoard();
+                updateUI();
+                if (isOnline) sendGameState(); // final (winning) move must reach the opponent too
+            }
+        }
+
+        function checkGoalWinCondition(team, targetR, targetC) {
+            const centerCol = Math.floor(cols / 2);
+            if (team === 'white' && targetR === rows - 1 && targetC === centerCol) {
+                triggerVictory('white', 'SCORED A GOAL IN THE OPPONENT\'S NET!');
+            } else if (team === 'black' && targetR === 0 && targetC === centerCol) {
+                triggerVictory('black', 'SCORED A GOAL IN THE OPPONENT\'S NET!');
+            }
+        }
+
+        function triggerVictory(winnerTeam, reason) {
+            gameOver = true;
+            logEvent(`🎉 GAME OVER! ${winnerTeam.toUpperCase()} WINS: ${reason}`);
+            setTimeout(() => alert(`🎉 GAME OVER!\n${winnerTeam.toUpperCase()} WINS!\nReason: ${reason}`), 50);
+        }
+
+        function endTurn() {
+            selectedPiecePos = null;
+            currentTurn = (currentTurn === 'white') ? 'black' : 'white';
+            if (currentTurn === 'white') {
+                turnCounter++;
+            }
+            
+            renderBoard();
+            updateUI();
+
+            if (isOnline) {
+                sendGameState();
+            }
+        }
+
+        function setActionMode(mode) {
+            actionMode = mode;
+            const btnMove = document.getElementById('btnMoveMode');
+            const btnPass = document.getElementById('btnPassMode');
+
+            if (mode === 'move') {
+                btnMove.className = 'py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-emerald-600 text-white shadow-lg';
+                btnPass.className = 'py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-slate-800 text-slate-400 hover:text-white';
+            } else {
+                btnPass.className = 'py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-amber-500 text-slate-950 shadow-lg';
+                btnMove.className = 'py-2.5 px-3 rounded-lg text-xs font-bold uppercase transition flex items-center justify-center space-x-2 bg-slate-800 text-slate-400 hover:text-white';
+            }
+            renderBoard();
+        }
+
+        function updateUI() {
+            const turnBadge = document.getElementById('turnBadge');
+            const turnText = document.getElementById('turnText');
+            const turnCount = document.getElementById('turnCount');
+
+            if (!turnBadge || !turnText || !turnCount) return;
+
+            if (currentTurn === 'white') {
+                turnBadge.className = 'w-4 h-4 rounded-full bg-slate-100 shadow-[0_0_10px_rgba(255,255,255,0.8)]';
+                turnText.textContent = "WHITE'S TURN";
+                turnText.className = 'font-teko text-2xl font-bold tracking-wide uppercase text-white';
+            } else {
+                turnBadge.className = 'w-4 h-4 rounded-full bg-slate-900 border-2 border-slate-400 shadow-[0_0_10px_rgba(0,0,0,0.8)]';
+                turnText.textContent = "BLACK'S TURN";
+                turnText.className = 'font-teko text-2xl font-bold tracking-wide uppercase text-slate-300';
+            }
+
+            turnCount.textContent = `Turn ${turnCounter}`;
+
+            const ballStatus = document.getElementById('ballPossessionText');
+            if (ballStatus) {
+                const possessorPiece = board[ballPos.r] ? board[ballPos.r][ballPos.c] : null;
+                if (possessorPiece) {
+                    ballStatus.textContent = `Held by ${possessorPiece.team.toUpperCase()} ${PIECE_TYPES[possessorPiece.type].code} at [${ballPos.c}, ${ballPos.r}]`;
+                    ballStatus.className = 'text-xs text-emerald-400 font-mono font-semibold';
+                } else {
+                    ballStatus.textContent = `Loose Ball at [${ballPos.c}, ${ballPos.r}]`;
+                    ballStatus.className = 'text-xs text-amber-400 font-mono';
+                }
+            }
+        }
+
+        function logEvent(msg) {
+            const logEl = document.getElementById('eventLog');
+            if (!logEl) return;
+            const item = document.createElement('div');
+            item.className = 'text-slate-300 border-b border-slate-800/50 pb-1';
+            item.innerHTML = `<span class="text-slate-500">[T${turnCounter}]</span> ${msg}`;
+            logEl.prepend(item);
+        }
+    </script>
+</body>
+</html>
